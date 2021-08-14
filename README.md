@@ -85,30 +85,30 @@ func main() {
 		gapstone.CS_ARCH_X86,
 		gapstone.CS_MODE_64,
 	)
+	if err != nil {
+		log.Fatalf("Failed to initialize engine: %v", err)
+	}
 
-	if err == nil {
-		defer engine.Close()
-		s := e.SectionByName(".text")
-		if s == nil {
-			log.Fatal(".text in not found")
-		}
+	defer engine.Close()
+	s := e.SectionByName(".text")
+	if s == nil {
+		log.Fatal(".text in not found")
+	}
 
-		insns, err := engine.Disasm(
-			[]byte(s.Raw),
-			0x10000,
-			0,
-		)
-
-		if err == nil {
-			for _, insn := range insns {
-				fmt.Printf("0x%x:\t%s\t\t%s\n", insn.Address, insn.Mnemonic, insn.OpStr)
-			}
-			return
-		}
+	insns, err := engine.Disasm(
+		[]byte(s.Raw),
+		0x10000,
+		0,
+	)
+	if err != nil {
 		log.Fatalf("Disassembly error: %v", err)
 	}
-	log.Fatalf("Failed to initialize engine: %v", err)
+
+	for _, insn := range insns {
+		fmt.Printf("0x%x:\t%s\t\t%s\n", insn.Address, insn.Mnemonic, insn.OpStr)
+	}
 }
+
 ```
 
 ```
