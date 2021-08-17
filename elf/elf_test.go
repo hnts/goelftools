@@ -152,3 +152,38 @@ func TestSectionByName(t *testing.T) {
 		}
 	}
 }
+
+func TestSectionsByAt(t *testing.T) {
+	for _, tt := range tests {
+		b, err := os.ReadFile(tt.fileName)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		e, err := elf.New(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for i, ts := range tt.sections {
+			s := e.SectionAt(uint16(i))
+			if s != nil {
+				if ts.Name != s.Name {
+					t.Errorf("%s:\n\thave %#v\n\twant %#v\n", tt.fileName, s.Name, ts.Name)
+				}
+
+				if !reflect.DeepEqual(ts.Header, s.Header) {
+					t.Errorf("%s:\n\thave %#v\n\twant %#v\n", tt.fileName, s.Header, ts.Header)
+				}
+			} else {
+				t.Errorf("%s: returned value of `e.SectionByName(%s)` should not be nil.", tt.fileName, ts.Name)
+			}
+		}
+
+		idx := len(e.Sections)
+		s := e.SectionAt(uint16(idx))
+		if s != nil {
+			t.Errorf("%s: returned value of `e.SectionByName(\"foooobar\")` should be nil. \n\thave %#v\n", tt.fileName, s)
+		}
+	}
+}
