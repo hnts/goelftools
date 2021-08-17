@@ -280,7 +280,7 @@ func (e *ELFFile) SectionsByType(sht SectionHeaderType) []*Section {
 // SectionAt get a setcion by index.
 func (e *ELFFile) SectionAt(n uint16) *Section {
 	ss := e.Sections
-	if n > uint16(len(ss)) {
+	if n >= uint16(len(ss)) {
 		return nil
 	}
 
