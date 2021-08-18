@@ -183,7 +183,38 @@ func TestSectionAt(t *testing.T) {
 		idx := len(e.Sections)
 		s := e.SectionAt(uint16(idx))
 		if s != nil {
-			t.Errorf("%s: returned value of `e.SectionByName(\"foooobar\")` should be nil. \n\thave %#v\n", tt.fileName, s)
+			t.Errorf("%s: returned value of `e.SectionAt(uint16(%d))` should be nil. \n\thave %#v\n", tt.fileName, idx, s)
+		}
+	}
+}
+
+func TestSegmentAt(t *testing.T) {
+	for _, tt := range tests {
+		b, err := os.ReadFile(tt.fileName)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		e, err := elf.New(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for i, ts := range tt.segments {
+			s := e.SegmentAt(uint16(i))
+			if s != nil {
+				if !reflect.DeepEqual(ts.Header, s.Header) {
+					t.Errorf("%s:\n\thave %#v\n\twant %#v\n", tt.fileName, s.Header, ts.Header)
+				}
+			} else {
+				t.Errorf("%s: e.Segments[%d] should not be nil.", tt.fileName, i)
+			}
+		}
+
+		idx := len(e.Segments)
+		s := e.SegmentAt(uint16(idx))
+		if s != nil {
+			t.Errorf("%s: returned value of `e.SegmentAt(uint16(%d))` should be nil. \n\thave %#v\n", tt.fileName, idx, s)
 		}
 	}
 }
