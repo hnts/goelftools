@@ -153,7 +153,7 @@ func TestSectionByName(t *testing.T) {
 	}
 }
 
-func TestSectionsByAt(t *testing.T) {
+func TestSectionAt(t *testing.T) {
 	for _, tt := range tests {
 		b, err := os.ReadFile(tt.fileName)
 		if err != nil {
