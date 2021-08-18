@@ -290,7 +290,7 @@ func (e *ELFFile) SegmentsByType(pt ProgramHeaderType) []*Segment {
 // SegmentAt get a segment by index.
 func (e *ELFFile) SegmentAt(n uint16) *Segment {
 	sgs := e.Segments
-	if n > uint16(len(sgs)) {
+	if n >= uint16(len(sgs)) {
 		return nil
 	}
 
