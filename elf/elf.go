@@ -253,18 +253,6 @@ func (e *ELFFile) SectionByName(name string) *Section {
 	return nil
 }
 
-// SectionsByFlag get sections by flag.
-func (e *ELFFile) SectionsByFlag(sf SectionFlag) []*Section {
-	var ss []*Section
-	for _, s := range e.Sections {
-		if s.Header.Flags == sf {
-			ss = append(ss, s)
-		}
-	}
-
-	return ss
-}
-
 // SectionsByType get sections by type.
 func (e *ELFFile) SectionsByType(sht SectionHeaderType) []*Section {
 	var ss []*Section
@@ -285,18 +273,6 @@ func (e *ELFFile) SectionAt(n uint16) *Section {
 	}
 
 	return ss[n]
-}
-
-// SegmentsByFlag get segments by flag.
-func (e *ELFFile) SegmentsByFlag(pf ProgramFlag) []*Segment {
-	var sgs []*Segment
-	for _, sg := range e.Segments {
-		if sg.Header.Flags == pf {
-			sgs = append(sgs, sg)
-		}
-	}
-
-	return sgs
 }
 
 // SegmentsByType get segments by type.
