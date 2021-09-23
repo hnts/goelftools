@@ -41,7 +41,7 @@ type elfHeader32 struct {
 	Shstrndx  uint16
 }
 
-type ELFFile struct {
+type elfFile struct {
 	Header     *ELFHeader
 	Sections   []*Section
 	Segments   []*Segment
@@ -108,7 +108,7 @@ type Segment struct {
 	Raw    []byte
 }
 
-func New(raw []byte) (*ELFFile, error) {
+func New(raw []byte) (*elfFile, error) {
 	if len(raw) < int(MAGIC_SIZE) {
 		return nil, xerrors.Errorf("insufficient elf format size: %d", len(raw))
 	}
@@ -147,7 +147,7 @@ func New(raw []byte) (*ELFFile, error) {
 		}
 	}
 
-	e := &ELFFile{
+	e := &elfFile{
 		Header:     &header,
 		Endianness: endianness,
 		Raw:        raw,
@@ -243,7 +243,7 @@ func New(raw []byte) (*ELFFile, error) {
 }
 
 // SectionByName get a section by name.
-func (e *ELFFile) SectionByName(name string) *Section {
+func (e *elfFile) SectionByName(name string) *Section {
 	for _, s := range e.Sections {
 		if s.Name == name {
 			return s
@@ -254,7 +254,7 @@ func (e *ELFFile) SectionByName(name string) *Section {
 }
 
 // SectionsByType get sections by type.
-func (e *ELFFile) SectionsByType(sht SectionHeaderType) []*Section {
+func (e *elfFile) SectionsByType(sht SectionHeaderType) []*Section {
 	var ss []*Section
 	for _, s := range e.Sections {
 		if s.Header.Type == sht {
@@ -266,7 +266,7 @@ func (e *ELFFile) SectionsByType(sht SectionHeaderType) []*Section {
 }
 
 // SectionAt get a setcion by index.
-func (e *ELFFile) SectionAt(n uint16) *Section {
+func (e *elfFile) SectionAt(n uint16) *Section {
 	ss := e.Sections
 	if n >= uint16(len(ss)) {
 		return nil
@@ -276,7 +276,7 @@ func (e *ELFFile) SectionAt(n uint16) *Section {
 }
 
 // SegmentsByType get segments by type.
-func (e *ELFFile) SegmentsByType(pt ProgramHeaderType) []*Segment {
+func (e *elfFile) SegmentsByType(pt ProgramHeaderType) []*Segment {
 	var sgs []*Segment
 	for _, sg := range e.Segments {
 		if sg.Header.Type == pt {
@@ -288,7 +288,7 @@ func (e *ELFFile) SegmentsByType(pt ProgramHeaderType) []*Segment {
 }
 
 // SegmentAt get a segment by index.
-func (e *ELFFile) SegmentAt(n uint16) *Segment {
+func (e *elfFile) SegmentAt(n uint16) *Segment {
 	sgs := e.Segments
 	if n >= uint16(len(sgs)) {
 		return nil
