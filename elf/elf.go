@@ -94,12 +94,12 @@ type ProgramHeader struct {
 
 type programHeader32 struct {
 	Type   uint32
-	Flags  uint32
 	Offset uint32
 	Vaddr  uint32
 	Paddr  uint32
 	Filesz uint32
 	Memsz  uint32
+	Flags  uint32
 	Align  uint32
 }
 
@@ -192,7 +192,14 @@ func New(raw []byte) (*elfFile, error) {
 			}
 
 			n := string(e.Raw[stroffset+uint64(shs[i].Name) : index])
-			sr := e.Raw[shs[i].Offset : shs[i].Offset+shs[i].Size]
+			
+			var sr []byte
+			if shs[i].Type != SHT_NOBITS {
+				sr = e.Raw[shs[i].Offset : shs[i].Offset+shs[i].Size]
+			} else {
+				sr = make([]byte, 0)
+			}
+
 			s := Section{
 				Header: shs[i],
 				Name:   n,
