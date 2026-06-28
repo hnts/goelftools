@@ -3,8 +3,7 @@ package elf
 import (
 	"bytes"
 	"encoding/binary"
-
-	"golang.org/x/xerrors"
+	"fmt"
 )
 
 type ELFHeader struct {
@@ -110,17 +109,17 @@ type Segment struct {
 
 func New(raw []byte) (*elfFile, error) {
 	if len(raw) < int(MAGIC_SIZE) {
-		return nil, xerrors.Errorf("insufficient elf format size: %d", len(raw))
+		return nil, fmt.Errorf("insufficient elf format size: %d", len(raw))
 	}
 
 	if !bytes.Equal(raw[:MAGIC_SIZE], []byte(ELF_MAGIC)) {
-		return nil, xerrors.Errorf("invalid magic number: %s", raw[:MAGIC_SIZE])
+		return nil, fmt.Errorf("invalid magic number: %s", raw[:MAGIC_SIZE])
 	}
 
 	var endianness binary.ByteOrder
 	if raw[EI_DATA] != 1 {
 		if raw[EI_DATA] != 2 {
-			return nil, xerrors.Errorf("invalid endianness: %d", raw[EI_DATA])
+			return nil, fmt.Errorf("invalid endianness: %d", raw[EI_DATA])
 		}
 		endianness = binary.BigEndian
 	} else {
@@ -128,7 +127,7 @@ func New(raw []byte) (*elfFile, error) {
 	}
 
 	if raw[EI_CLASS] != 1 && raw[EI_CLASS] != 2 {
-		return nil, xerrors.Errorf("invalid elf class: %d", raw[EI_CLASS])
+		return nil, fmt.Errorf("invalid elf class: %d", raw[EI_CLASS])
 	}
 
 	var header ELFHeader
@@ -137,13 +136,13 @@ func New(raw []byte) (*elfFile, error) {
 		header32 := new(elfHeader32)
 		err := binary.Read(r, endianness, header32)
 		if err != nil {
-			return nil, xerrors.Errorf("failed to read elf header: %w", err)
+			return nil, fmt.Errorf("failed to read elf header: %w", err)
 		}
 		header = convertToELFHeader(header32)
 	} else {
 		err := binary.Read(r, endianness, &header)
 		if err != nil {
-			return nil, xerrors.Errorf("failed to read elf header: %w", err)
+			return nil, fmt.Errorf("failed to read elf header: %w", err)
 		}
 	}
 
@@ -157,7 +156,7 @@ func New(raw []byte) (*elfFile, error) {
 		e.Sections = make([]*Section, 0)
 	} else {
 		if uint64(len(e.Raw)) <= header.Shoff {
-			return nil, xerrors.Errorf("invalid section header offset: %d", header.Shoff)
+			return nil, fmt.Errorf("invalid section header offset: %d", header.Shoff)
 		}
 
 		shs := make([]SectionHeader, header.Shnum)
@@ -166,7 +165,7 @@ func New(raw []byte) (*elfFile, error) {
 			sh32s := make([]sectionHeader32, header.Shnum)
 			err := binary.Read(r, endianness, sh32s)
 			if err != nil {
-				return nil, xerrors.Errorf("failed to read section header: %w", err)
+				return nil, fmt.Errorf("failed to read section header: %w", err)
 			}
 
 			for i := 0; i < len(sh32s); i++ {
@@ -175,7 +174,7 @@ func New(raw []byte) (*elfFile, error) {
 		} else {
 			err := binary.Read(r, endianness, shs)
 			if err != nil {
-				return nil, xerrors.Errorf("failed to read section header: %w", err)
+				return nil, fmt.Errorf("failed to read section header: %w", err)
 			}
 		}
 
@@ -184,7 +183,7 @@ func New(raw []byte) (*elfFile, error) {
 		for i := 0; i < len(shs); i++ {
 			index := stroffset + uint64(shs[i].Name)
 			if uint64(len(e.Raw)) <= index {
-				return nil, xerrors.Errorf("invalid section string index: %d", index)
+				return nil, fmt.Errorf("invalid section string index: %d", index)
 			}
 
 			for e.Raw[index] != 0 {
@@ -213,7 +212,7 @@ func New(raw []byte) (*elfFile, error) {
 		e.Segments = make([]*Segment, 0)
 	} else {
 		if header.Phoff >= uint64(len(e.Raw)) {
-			return nil, xerrors.Errorf("invalid program header offset: %d", header.Phoff)
+			return nil, fmt.Errorf("invalid program header offset: %d", header.Phoff)
 		}
 
 		phs := make([]ProgramHeader, header.Phnum)
@@ -222,7 +221,7 @@ func New(raw []byte) (*elfFile, error) {
 			ph32s := make([]programHeader32, header.Phnum)
 			err := binary.Read(r, endianness, ph32s)
 			if err != nil {
-				return nil, xerrors.Errorf("failed to read program header: %w", err)
+				return nil, fmt.Errorf("failed to read program header: %w", err)
 			}
 
 			for i := 0; i < len(ph32s); i++ {
@@ -231,7 +230,7 @@ func New(raw []byte) (*elfFile, error) {
 		} else {
 			err := binary.Read(r, endianness, phs)
 			if err != nil {
-				return nil, xerrors.Errorf("failed to read program header: %w", err)
+				return nil, fmt.Errorf("failed to read program header: %w", err)
 			}
 		}
 
