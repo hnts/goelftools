@@ -12,6 +12,10 @@ const (
 	EI_PADDING    uint8 = 9
 )
 
+// SHN_XINDEX marks that the real section header string table index is stored
+// out of band (in the sh_link field of section 0), which is not yet supported.
+const SHN_XINDEX uint16 = 0xffff
+
 type Type uint16
 
 const (
