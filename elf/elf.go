@@ -40,7 +40,9 @@ type elfHeader32 struct {
 	Shstrndx  uint16
 }
 
-type elfFile struct {
+// File represents a parsed ELF file, including its header, sections,
+// segments, detected endianness, and the raw underlying bytes.
+type File struct {
 	Header     *ELFHeader
 	Sections   []*Section
 	Segments   []*Segment
@@ -218,7 +220,7 @@ func parseProgramHeaders(raw []byte, endianness binary.ByteOrder, is32 bool, pho
 	return phs, nil
 }
 
-func New(raw []byte) (*elfFile, error) {
+func New(raw []byte) (*File, error) {
 	if len(raw) < int(MAGIC_SIZE) {
 		return nil, fmt.Errorf("insufficient elf format size: %d", len(raw))
 	}
@@ -260,7 +262,7 @@ func New(raw []byte) (*elfFile, error) {
 		}
 	}
 
-	e := &elfFile{
+	e := &File{
 		Header:     &header,
 		Endianness: endianness,
 		Raw:        raw,
@@ -337,7 +339,7 @@ func New(raw []byte) (*elfFile, error) {
 }
 
 // SectionByName get a section by name.
-func (e *elfFile) SectionByName(name string) *Section {
+func (e *File) SectionByName(name string) *Section {
 	for _, s := range e.Sections {
 		if s.Name == name {
 			return s
@@ -348,7 +350,7 @@ func (e *elfFile) SectionByName(name string) *Section {
 }
 
 // SectionsByType get sections by type.
-func (e *elfFile) SectionsByType(sht SectionHeaderType) []*Section {
+func (e *File) SectionsByType(sht SectionHeaderType) []*Section {
 	var ss []*Section
 	for _, s := range e.Sections {
 		if s.Header.Type == sht {
@@ -360,7 +362,7 @@ func (e *elfFile) SectionsByType(sht SectionHeaderType) []*Section {
 }
 
 // SectionAt get a setcion by index.
-func (e *elfFile) SectionAt(n uint16) *Section {
+func (e *File) SectionAt(n uint16) *Section {
 	ss := e.Sections
 	if n >= uint16(len(ss)) {
 		return nil
@@ -370,7 +372,7 @@ func (e *elfFile) SectionAt(n uint16) *Section {
 }
 
 // SegmentsByType get segments by type.
-func (e *elfFile) SegmentsByType(pt ProgramHeaderType) []*Segment {
+func (e *File) SegmentsByType(pt ProgramHeaderType) []*Segment {
 	var sgs []*Segment
 	for _, sg := range e.Segments {
 		if sg.Header.Type == pt {
@@ -382,7 +384,7 @@ func (e *elfFile) SegmentsByType(pt ProgramHeaderType) []*Segment {
 }
 
 // SegmentAt get a segment by index.
-func (e *elfFile) SegmentAt(n uint16) *Segment {
+func (e *File) SegmentAt(n uint16) *Segment {
 	sgs := e.Segments
 	if n >= uint16(len(sgs)) {
 		return nil
