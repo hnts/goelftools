@@ -188,6 +188,249 @@ func TestSectionAt(t *testing.T) {
 	}
 }
 
+// validELF64 builds a minimal but well-formed little-endian 64-bit ELF
+// containing a NULL section and a .shstrtab section, with the string table
+// placed at the end of the file so tests can truncate the terminating null.
+func validELF64() []byte {
+	const (
+		ehsize  = 64
+		shentsz = 64
+		shnum   = 2
+	)
+	strtab := []byte("\x00.shstrtab\x00")
+	shoff := uint64(ehsize)
+	strOff := shoff + shentsz*shnum
+	total := strOff + uint64(len(strtab))
+
+	raw := make([]byte, total)
+
+	copy(raw[0:4], []byte(elf.ELF_MAGIC))
+	raw[4] = 2 // EI_CLASS = ELFCLASS64
+	raw[5] = 1 // EI_DATA = little endian
+	raw[6] = 1 // EI_VERSION
+
+	le := binary.LittleEndian
+	le.PutUint16(raw[16:], 2)       // e_type = ET_EXEC
+	le.PutUint16(raw[18:], 0x3e)    // e_machine = x86-64
+	le.PutUint32(raw[20:], 1)       // e_version
+	le.PutUint64(raw[40:], shoff)   // e_shoff
+	le.PutUint16(raw[52:], ehsize)  // e_ehsize
+	le.PutUint16(raw[58:], shentsz) // e_shentsize
+	le.PutUint16(raw[60:], shnum)   // e_shnum
+	le.PutUint16(raw[62:], 1)       // e_shstrndx
+
+	copy(raw[strOff:], strtab)
+
+	// section 1: .shstrtab (section 0 stays all-zero / NULL)
+	sh1 := shoff + shentsz
+	le.PutUint32(raw[sh1+0:], 1)                    // sh_name -> ".shstrtab"
+	le.PutUint32(raw[sh1+4:], 3)                    // sh_type = SHT_STRTAB
+	le.PutUint64(raw[sh1+24:], strOff)              // sh_offset
+	le.PutUint64(raw[sh1+32:], uint64(len(strtab))) // sh_size
+
+	return raw
+}
+
+// validELF64WithSegment builds a minimal 64-bit ELF with no sections and a
+// single PT_LOAD program header, used to exercise segment parsing.
+func validELF64WithSegment() []byte {
+	const (
+		ehsize  = 64
+		phentsz = 56
+		phnum   = 1
+	)
+	phoff := uint64(ehsize)
+	total := phoff + phentsz*phnum
+
+	raw := make([]byte, total)
+
+	copy(raw[0:4], []byte(elf.ELF_MAGIC))
+	raw[4] = 2
+	raw[5] = 1
+	raw[6] = 1
+
+	le := binary.LittleEndian
+	le.PutUint16(raw[16:], 2)
+	le.PutUint16(raw[18:], 0x3e)
+	le.PutUint32(raw[20:], 1)
+	le.PutUint64(raw[32:], phoff)   // e_phoff
+	le.PutUint16(raw[52:], ehsize)  // e_ehsize
+	le.PutUint16(raw[54:], phentsz) // e_phentsize
+	le.PutUint16(raw[56:], phnum)   // e_phnum
+
+	// program header 0: PT_LOAD covering the start of the file
+	le.PutUint32(raw[phoff+0:], 1)       // p_type = PT_LOAD
+	le.PutUint64(raw[phoff+8:], 0)       // p_offset
+	le.PutUint64(raw[phoff+32:], ehsize) // p_filesz
+
+	return raw
+}
+
+// validELF32 builds a minimal well-formed little-endian 32-bit ELF, used to
+// exercise the 32-bit conversion paths.
+func validELF32() []byte {
+	const (
+		ehsize  = 52
+		shentsz = 40
+		shnum   = 2
+	)
+	strtab := []byte("\x00.shstrtab\x00")
+	strOff := uint64(ehsize)
+	shoff := strOff + uint64(len(strtab))
+	total := shoff + shentsz*shnum
+
+	raw := make([]byte, total)
+
+	copy(raw[0:4], []byte(elf.ELF_MAGIC))
+	raw[4] = 1 // EI_CLASS = ELFCLASS32
+	raw[5] = 1 // EI_DATA = little endian
+	raw[6] = 1 // EI_VERSION
+
+	le := binary.LittleEndian
+	le.PutUint16(raw[16:], 2)             // e_type
+	le.PutUint16(raw[18:], 3)             // e_machine = EM_386
+	le.PutUint32(raw[20:], 1)             // e_version
+	le.PutUint32(raw[32:], uint32(shoff)) // e_shoff
+	le.PutUint16(raw[40:], ehsize)        // e_ehsize
+	le.PutUint16(raw[46:], shentsz)       // e_shentsize
+	le.PutUint16(raw[48:], shnum)         // e_shnum
+	le.PutUint16(raw[50:], 1)             // e_shstrndx
+
+	copy(raw[strOff:], strtab)
+
+	sh1 := shoff + shentsz
+	le.PutUint32(raw[sh1+0:], 1)                    // sh_name
+	le.PutUint32(raw[sh1+4:], 3)                    // sh_type = SHT_STRTAB
+	le.PutUint32(raw[sh1+16:], uint32(strOff))      // sh_offset
+	le.PutUint32(raw[sh1+20:], uint32(len(strtab))) // sh_size
+
+	return raw
+}
+
+func TestNewValidSynthetic(t *testing.T) {
+	cases := map[string][]byte{
+		"elf64":            validELF64(),
+		"elf64WithSegment": validELF64WithSegment(),
+		"elf32":            validELF32(),
+	}
+
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := elf.New(raw); err != nil {
+				t.Fatalf("expected valid ELF to parse, got error: %s", err)
+			}
+		})
+	}
+}
+
+func TestNewMalformed(t *testing.T) {
+	le := binary.LittleEndian
+
+	cases := []struct {
+		name  string
+		build func() []byte
+	}{
+		{
+			name: "shstrndx out of range",
+			build: func() []byte {
+				raw := validELF64()
+				le.PutUint16(raw[60:], 2) // e_shnum
+				le.PutUint16(raw[62:], 5) // e_shstrndx >= shnum
+				return raw
+			},
+		},
+		{
+			name: "shstrndx is SHN_XINDEX",
+			build: func() []byte {
+				raw := validELF64()
+				le.PutUint16(raw[62:], 0xffff) // e_shstrndx = SHN_XINDEX
+				return raw
+			},
+		},
+		{
+			name: "section name offset out of bounds",
+			build: func() []byte {
+				raw := validELF64()
+				sh1 := uint64(64 + 64)          // section header 1
+				le.PutUint32(raw[sh1+0:], 1000) // sh_name far beyond file
+				return raw
+			},
+		},
+		{
+			name: "section name not null terminated",
+			build: func() []byte {
+				raw := validELF64()
+				return raw[:len(raw)-1] // drop the terminating null
+			},
+		},
+		{
+			name: "terminating null lies outside the string table",
+			build: func() []byte {
+				// The file still contains a trailing null, but the
+				// declared string table size excludes it, so the name
+				// must be reported as unterminated within the table.
+				raw := validELF64()
+				sh1 := uint64(64 + 64)
+				le.PutUint64(raw[sh1+32:], uint64(len("\x00.shstrtab"))) // sh_size excludes final null
+				return raw
+			},
+		},
+		{
+			name: "section body out of bounds",
+			build: func() []byte {
+				raw := validELF64()
+				sh1 := uint64(64 + 64)
+				le.PutUint64(raw[sh1+32:], 0xffffffff) // sh_size huge
+				return raw
+			},
+		},
+		{
+			name: "section entry size too small",
+			build: func() []byte {
+				raw := validELF64()
+				le.PutUint16(raw[58:], 1) // e_shentsize < struct size
+				return raw
+			},
+		},
+		{
+			name: "segment body out of bounds",
+			build: func() []byte {
+				raw := validELF64WithSegment()
+				le.PutUint64(raw[64+32:], 0xffffffff) // p_filesz huge
+				return raw
+			},
+		},
+		{
+			name: "program entry size too small",
+			build: func() []byte {
+				raw := validELF64WithSegment()
+				le.PutUint16(raw[54:], 1) // e_phentsize < struct size
+				return raw
+			},
+		},
+		{
+			name: "truncated before ident",
+			build: func() []byte {
+				return []byte(elf.ELF_MAGIC) // only 4 bytes
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("New panicked instead of returning an error: %v", r)
+				}
+			}()
+
+			if _, err := elf.New(tc.build()); err == nil {
+				t.Fatalf("expected error for malformed ELF, got nil")
+			}
+		})
+	}
+}
+
 func TestSegmentAt(t *testing.T) {
 	for _, tt := range tests {
 		b, err := os.ReadFile(tt.fileName)

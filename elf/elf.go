@@ -107,6 +107,117 @@ type Segment struct {
 	Raw    []byte
 }
 
+var (
+	sizeSectionHeader32 = uint64(binary.Size(sectionHeader32{}))
+	sizeSectionHeader64 = uint64(binary.Size(SectionHeader{}))
+	sizeProgramHeader32 = uint64(binary.Size(programHeader32{}))
+	sizeProgramHeader64 = uint64(binary.Size(ProgramHeader{}))
+)
+
+// safeSlice returns raw[offset:offset+size] only when the range is fully
+// contained in raw, guarding against integer overflow and out-of-bounds
+// access caused by malformed ELF files.
+func safeSlice(raw []byte, offset, size uint64) ([]byte, error) {
+	end := offset + size
+	if end < offset {
+		return nil, fmt.Errorf("range [%d:%d+%d] overflows", offset, offset, size)
+	}
+	if offset > uint64(len(raw)) || end > uint64(len(raw)) {
+		return nil, fmt.Errorf("range [%d:%d] out of bounds (len %d)", offset, end, len(raw))
+	}
+
+	return raw[offset:end], nil
+}
+
+// sectionName resolves a null-terminated name at nameOffset inside the
+// section header string table, bounded by the string table itself rather than
+// the whole file. A NUL that only appears in data following the table is not
+// accepted as a terminator.
+func sectionName(strtab []byte, nameOffset uint32) (string, error) {
+	if uint64(nameOffset) >= uint64(len(strtab)) {
+		return "", fmt.Errorf("invalid section name offset: %d (string table size %d)", nameOffset, len(strtab))
+	}
+
+	rel := bytes.IndexByte(strtab[nameOffset:], 0)
+	if rel < 0 {
+		return "", fmt.Errorf("section name at offset %d is not null-terminated within the string table", nameOffset)
+	}
+
+	return string(strtab[nameOffset : uint64(nameOffset)+uint64(rel)]), nil
+}
+
+func parseSectionHeaders(raw []byte, endianness binary.ByteOrder, is32 bool, shoff uint64, shnum, shentsize uint16) ([]SectionHeader, error) {
+	structSize := sizeSectionHeader64
+	if is32 {
+		structSize = sizeSectionHeader32
+	}
+	if uint64(shentsize) < structSize {
+		return nil, fmt.Errorf("invalid section header entry size: %d", shentsize)
+	}
+
+	shs := make([]SectionHeader, shnum)
+	for i := 0; i < int(shnum); i++ {
+		entryOffset := shoff + uint64(i)*uint64(shentsize)
+		buf, err := safeSlice(raw, entryOffset, structSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read section header %d: %w", i, err)
+		}
+
+		r := bytes.NewReader(buf)
+		if is32 {
+			var sh32 sectionHeader32
+			if err := binary.Read(r, endianness, &sh32); err != nil {
+				return nil, fmt.Errorf("failed to read section header %d: %w", i, err)
+			}
+			shs[i] = convertToSectionHeader(&sh32)
+		} else {
+			var sh SectionHeader
+			if err := binary.Read(r, endianness, &sh); err != nil {
+				return nil, fmt.Errorf("failed to read section header %d: %w", i, err)
+			}
+			shs[i] = sh
+		}
+	}
+
+	return shs, nil
+}
+
+func parseProgramHeaders(raw []byte, endianness binary.ByteOrder, is32 bool, phoff uint64, phnum, phentsize uint16) ([]ProgramHeader, error) {
+	structSize := sizeProgramHeader64
+	if is32 {
+		structSize = sizeProgramHeader32
+	}
+	if uint64(phentsize) < structSize {
+		return nil, fmt.Errorf("invalid program header entry size: %d", phentsize)
+	}
+
+	phs := make([]ProgramHeader, phnum)
+	for i := 0; i < int(phnum); i++ {
+		entryOffset := phoff + uint64(i)*uint64(phentsize)
+		buf, err := safeSlice(raw, entryOffset, structSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read program header %d: %w", i, err)
+		}
+
+		r := bytes.NewReader(buf)
+		if is32 {
+			var ph32 programHeader32
+			if err := binary.Read(r, endianness, &ph32); err != nil {
+				return nil, fmt.Errorf("failed to read program header %d: %w", i, err)
+			}
+			phs[i] = convertToProgramHeader(&ph32)
+		} else {
+			var ph ProgramHeader
+			if err := binary.Read(r, endianness, &ph); err != nil {
+				return nil, fmt.Errorf("failed to read program header %d: %w", i, err)
+			}
+			phs[i] = ph
+		}
+	}
+
+	return phs, nil
+}
+
 func New(raw []byte) (*elfFile, error) {
 	if len(raw) < int(MAGIC_SIZE) {
 		return nil, fmt.Errorf("insufficient elf format size: %d", len(raw))
@@ -116,32 +227,35 @@ func New(raw []byte) (*elfFile, error) {
 		return nil, fmt.Errorf("invalid magic number: %s", raw[:MAGIC_SIZE])
 	}
 
+	if len(raw) <= int(EI_DATA) {
+		return nil, fmt.Errorf("insufficient elf format size: %d", len(raw))
+	}
+
 	var endianness binary.ByteOrder
-	if raw[EI_DATA] != 1 {
-		if raw[EI_DATA] != 2 {
-			return nil, fmt.Errorf("invalid endianness: %d", raw[EI_DATA])
-		}
-		endianness = binary.BigEndian
-	} else {
+	switch raw[EI_DATA] {
+	case 1:
 		endianness = binary.LittleEndian
+	case 2:
+		endianness = binary.BigEndian
+	default:
+		return nil, fmt.Errorf("invalid endianness: %d", raw[EI_DATA])
 	}
 
 	if raw[EI_CLASS] != 1 && raw[EI_CLASS] != 2 {
 		return nil, fmt.Errorf("invalid elf class: %d", raw[EI_CLASS])
 	}
+	is32 := raw[EI_CLASS] == 1
 
 	var header ELFHeader
 	r := bytes.NewReader(raw)
-	if raw[EI_CLASS] == 1 {
+	if is32 {
 		header32 := new(elfHeader32)
-		err := binary.Read(r, endianness, header32)
-		if err != nil {
+		if err := binary.Read(r, endianness, header32); err != nil {
 			return nil, fmt.Errorf("failed to read elf header: %w", err)
 		}
 		header = convertToELFHeader(header32)
 	} else {
-		err := binary.Read(r, endianness, &header)
-		if err != nil {
+		if err := binary.Read(r, endianness, &header); err != nil {
 			return nil, fmt.Errorf("failed to read elf header: %w", err)
 		}
 	}
@@ -155,93 +269,67 @@ func New(raw []byte) (*elfFile, error) {
 	if header.Shnum == 0 {
 		e.Sections = make([]*Section, 0)
 	} else {
-		if uint64(len(e.Raw)) <= header.Shoff {
-			return nil, fmt.Errorf("invalid section header offset: %d", header.Shoff)
+		shs, err := parseSectionHeaders(raw, endianness, is32, header.Shoff, header.Shnum, header.Shentsize)
+		if err != nil {
+			return nil, err
 		}
 
-		shs := make([]SectionHeader, header.Shnum)
-		r = bytes.NewReader(e.Raw[header.Shoff:])
-		if e.Header.Ident[EI_CLASS] == 1 {
-			sh32s := make([]sectionHeader32, header.Shnum)
-			err := binary.Read(r, endianness, sh32s)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read section header: %w", err)
-			}
-
-			for i := 0; i < len(sh32s); i++ {
-				shs[i] = convertToSectionHeader(&sh32s[i])
-			}
-		} else {
-			err := binary.Read(r, endianness, shs)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read section header: %w", err)
-			}
+		if header.Shstrndx == SHN_XINDEX {
+			return nil, fmt.Errorf("unsupported extended section header string table index (SHN_XINDEX)")
+		}
+		if header.Shstrndx >= header.Shnum {
+			return nil, fmt.Errorf("invalid section header string table index: %d", header.Shstrndx)
+		}
+		strtabHeader := shs[header.Shstrndx]
+		strtab, err := safeSlice(raw, strtabHeader.Offset, strtabHeader.Size)
+		if err != nil {
+			return nil, fmt.Errorf("invalid section header string table: %w", err)
 		}
 
 		e.Sections = make([]*Section, header.Shnum)
-		stroffset := shs[header.Shstrndx].Offset
 		for i := 0; i < len(shs); i++ {
-			index := stroffset + uint64(shs[i].Name)
-			if uint64(len(e.Raw)) <= index {
-				return nil, fmt.Errorf("invalid section string index: %d", index)
+			name, err := sectionName(strtab, shs[i].Name)
+			if err != nil {
+				return nil, err
 			}
 
-			for e.Raw[index] != 0 {
-				index++
-			}
-
-			n := string(e.Raw[stroffset+uint64(shs[i].Name) : index])
-			
 			var sr []byte
 			if shs[i].Type != SHT_NOBITS {
-				sr = e.Raw[shs[i].Offset : shs[i].Offset+shs[i].Size]
+				sr, err = safeSlice(raw, shs[i].Offset, shs[i].Size)
+				if err != nil {
+					return nil, fmt.Errorf("invalid section %d (%s) body: %w", i, name, err)
+				}
 			} else {
 				sr = make([]byte, 0)
 			}
 
-			s := Section{
+			e.Sections[i] = &Section{
 				Header: shs[i],
-				Name:   n,
+				Name:   name,
 				Raw:    sr,
 			}
-			e.Sections[i] = &s
 		}
 	}
 
 	if header.Phnum == 0 {
 		e.Segments = make([]*Segment, 0)
 	} else {
-		if header.Phoff >= uint64(len(e.Raw)) {
-			return nil, fmt.Errorf("invalid program header offset: %d", header.Phoff)
-		}
-
-		phs := make([]ProgramHeader, header.Phnum)
-		r = bytes.NewReader(e.Raw[header.Phoff:])
-		if e.Header.Ident[EI_CLASS] == 1 {
-			ph32s := make([]programHeader32, header.Phnum)
-			err := binary.Read(r, endianness, ph32s)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read program header: %w", err)
-			}
-
-			for i := 0; i < len(ph32s); i++ {
-				phs[i] = convertToProgramHeader(&ph32s[i])
-			}
-		} else {
-			err := binary.Read(r, endianness, phs)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read program header: %w", err)
-			}
+		phs, err := parseProgramHeaders(raw, endianness, is32, header.Phoff, header.Phnum, header.Phentsize)
+		if err != nil {
+			return nil, err
 		}
 
 		e.Segments = make([]*Segment, header.Phnum)
 		for i := 0; i < len(phs); i++ {
-			sgr := e.Raw[phs[i].Offset : phs[i].Offset+phs[i].Filesz]
-			sg := Segment{
+			sgr, err := safeSlice(raw, phs[i].Offset, phs[i].Filesz)
+			if err != nil {
+				return nil, fmt.Errorf("invalid segment %d body: %w", i, err)
+			}
+
+			e.Segments[i] = &Segment{
 				Header: phs[i],
 				Raw:    sgr,
 			}
-			e.Segments[i] = &sg
 		}
 	}
 
